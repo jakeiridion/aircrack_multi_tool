@@ -1,64 +1,81 @@
 import subprocess
 import os
+from collections import deque
+import re
+from datetime import datetime
 
 
 class Aircrack:
-    def __init__(self):
-        self.time = None
+    def __init__(self, cap_path, word_list_path):
+        self.time = datetime(1900, 1, 1, 0, 0, 0)
+        self.running = True
+        self.__queue = deque(maxlen=2)
+        self.aircrack = subprocess.Popen(self.__get_command(cap_path, word_list_path), stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT, bufsize=1, text=True)
 
-    def paths_are_valid(self, cap_path, word_list_path):
+    def __paths_are_valid(self, cap_path, word_list_path):
         if os.path.isfile(cap_path) and os.path.isfile(word_list_path):
             return True
         return False
 
-    def get_command(self, cap_path, word_list_path):
-        if self.paths_are_valid(cap_path, word_list_path):
+    def __get_command(self, cap_path, word_list_path):
+        if self.__paths_are_valid(cap_path, word_list_path):
             return ["aircrack-ng", cap_path, "-w", word_list_path]
         # Raise Exception
 
-    def format_key(self, key_str):
+    def __was_key_found(self, key):
+        if key == "KEY NOT FOUND":
+            print("bye")
+            quit()
+
+    def __format_key(self, key_str):
         key = str(key_str).replace("", "")
         key = key[key.find("KEY"):]
         return key
 
-    def what_list_to_use(self, normal, back_up):
-        if len(back_up) != 0:
-            if "KEY FOUND!" in back_up[-2]:
-                return back_up
-        if len(normal) < 2:
-            return back_up
-        return normal
+    def __extract_password_from_key(self, key):
+        password = key[key.find("[") + 2:-2]
+        return password
 
-    def no_key_found(self, key_list):
-        if "KEY NOT FOUND" in key_list[-3]:
-            quit()
-
-    def get_key(self, lines, back_up_lines):
-        key_list = self.what_list_to_use(lines, back_up_lines)
-        self.no_key_found(key_list)
-        un_formatted_key = key_list[-2].strip()
-        key = self.format_key(un_formatted_key)
+    def __get_key(self):
+        un_formatted_key = self.__queue[0]
+        key = self.__format_key(un_formatted_key)
+        self.__was_key_found(key)
         return key
 
-    def run_aircrack(self, cap_path, word_list_path):
-        aircrack = subprocess.Popen(self.get_command(cap_path, word_list_path), stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, bufsize=1, text=True)
-        lines = []
-        back_up_lines = []
+    def __update_time(self, line):
+        hour = "0"
+        minute = "0"
+        second = "0"
+        if "Time left:" in line:
+            if "hour" in line:
+                hour = re.findall(r"Time left: (.*) hour", line.strip())[0]
+                if "minute" in line:
+                    minute = re.findall(r"(?<=, )(.*?)(?=\s)", line.strip())[0]
+                if "second" in line and "minute" not in line:
+                    second = re.findall(r"(?<=, )(.*?)(?=\s)", line.strip())[0]
+                elif "second" in line:
+                    second = re.findall(r"(?<=, )(.*?)(?=\s)", line.strip())[-1]
+            elif "minute" in line:
+                minute = re.findall(r"Time left: (.*) minute", line.strip())[0]
+                second = re.findall(r"(?<=, )(.*?)(?=\s)", line.strip())[0]
+            elif "second" in line:
+                second = re.findall(r"Time left: (.*) second", line.strip())[0]
 
-        while aircrack.poll() is None:
-            line = aircrack.stdout.readline()
-            lines.append(line.strip())
-            print(len(lines))
-            if len(lines) == 500:
-                back_up_lines = lines.copy()
-                lines.clear()
+            self.time = datetime.strptime(f"{hour}:{minute}:{second}", "%H:%M:%S")
 
-        key = self.get_key(lines, back_up_lines)
+    def stop_process(self):
+        self.aircrack.terminate()
+        quit()
 
-        password = key[key.find("[") + 2:-2]
+    def run_aircrack(self):
+        while self.aircrack.poll() is None:
+            for line in iter(self.aircrack.stdout.readline, ""):
+                self.__queue.append(line.strip())
+                self.__update_time(line.strip())
+
+        password = self.__extract_password_from_key(self.__get_key())
         print(password)
 
 
-a = Aircrack()
-a.run_aircrack("./known_pass.cap", "./test.txt")
+a = Aircrack("./known_pass.cap", "./test.txt")
