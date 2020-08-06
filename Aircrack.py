@@ -1,5 +1,4 @@
 import subprocess
-import os
 from collections import deque
 import re
 from datetime import datetime
@@ -8,25 +7,20 @@ from datetime import datetime
 class Aircrack:
     def __init__(self, cap_path, word_list_path):
         self.time = datetime(1900, 1, 1, 0, 0, 0)
+        self.password = None
         self.running = True
         self.__queue = deque(maxlen=2)
-        self.aircrack = subprocess.Popen(self.__get_command(cap_path, word_list_path), stdout=subprocess.PIPE,
-                                         stderr=subprocess.STDOUT, bufsize=1, text=True)
-
-    def __paths_are_valid(self, cap_path, word_list_path):
-        if os.path.isfile(cap_path) and os.path.isfile(word_list_path):
-            return True
-        return False
+        self.__cap_path = cap_path
+        self.__word_list_path = word_list_path
 
     def __get_command(self, cap_path, word_list_path):
-        if self.__paths_are_valid(cap_path, word_list_path):
-            return ["aircrack-ng", cap_path, "-w", word_list_path]
-        # Raise Exception
+        return ["aircrack-ng", cap_path, "-w", word_list_path]
 
-    def __was_key_found(self, key):
+    def __was_key_found(self, key, shared_list):
         if key == "KEY NOT FOUND":
-            print("bye")
-            quit()
+            self.running = False
+            shared_list[:] = (self.password, self.time, self.running)
+            exit(0)
 
     def __format_key(self, key_str):
         key = str(key_str).replace("", "")
@@ -37,11 +31,14 @@ class Aircrack:
         password = key[key.find("[") + 2:-2]
         return password
 
-    def __get_key(self):
+    def __get_key(self, shared_list):
         un_formatted_key = self.__queue[0]
         key = self.__format_key(un_formatted_key)
-        self.__was_key_found(key)
+        self.__was_key_found(key, shared_list)
         return key
+
+    def get_word_list_path(self):
+        return self.__word_list_path
 
     def __update_time(self, line):
         hour = "0"
@@ -64,18 +61,17 @@ class Aircrack:
 
             self.time = datetime.strptime(f"{hour}:{minute}:{second}", "%H:%M:%S")
 
-    def stop_process(self):
-        self.aircrack.terminate()
-        quit()
+    def run_aircrack(self, shared_list):
+        aircrack = subprocess.Popen(self.__get_command(self.__cap_path, self.__word_list_path), stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, bufsize=1, text=True)
 
-    def run_aircrack(self):
-        while self.aircrack.poll() is None:
-            for line in iter(self.aircrack.stdout.readline, ""):
+        while aircrack.poll() is None:
+            for line in iter(aircrack.stdout.readline, ""):
                 self.__queue.append(line.strip())
                 self.__update_time(line.strip())
+                shared_list[:] = (self.password, self.time, self.running)
 
-        password = self.__extract_password_from_key(self.__get_key())
-        print(password)
-
-
-a = Aircrack("./known_pass.cap", "./test.txt")
+        password = self.__extract_password_from_key(self.__get_key(shared_list))
+        self.password = password
+        self.running = False
+        shared_list[:] = (self.password, self.time, self.running)
