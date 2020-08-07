@@ -5,7 +5,7 @@ from datetime import datetime
 
 
 class Aircrack:
-    def __init__(self, cap_path, word_list_path):
+    def __init__(self, cap_path, word_list_path, ):
         self.time = datetime(1900, 1, 1, 0, 0, 0)
         self.password = None
         self.running = True
@@ -62,16 +62,21 @@ class Aircrack:
             self.time = datetime.strptime(f"{hour}:{minute}:{second}", "%H:%M:%S")
 
     def run_aircrack(self, shared_list):
-        aircrack = subprocess.Popen(self.__get_command(self.__cap_path, self.__word_list_path), stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, bufsize=1, text=True)
+        try:
+            aircrack = subprocess.Popen(self.__get_command(self.__cap_path, self.__word_list_path), stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, text=True)
 
-        while aircrack.poll() is None:
-            for line in iter(aircrack.stdout.readline, ""):
-                self.__queue.append(line.strip())
-                self.__update_time(line.strip())
-                shared_list[:] = (self.password, self.time, self.running)
+            while aircrack.poll() is None:
+                for line in iter(aircrack.stdout.readline, ""):
+                    self.__queue.append(line.strip())
+                    self.__update_time(line.strip())
+                    shared_list[:] = (self.password, self.time, self.running)
 
-        password = self.__extract_password_from_key(self.__get_key(shared_list))
-        self.password = password
-        self.running = False
-        shared_list[:] = (self.password, self.time, self.running)
+            password = self.__extract_password_from_key(self.__get_key(shared_list))
+            self.password = password
+            self.running = False
+            shared_list[:] = (self.password, self.time, self.running)
+            aircrack.terminate()
+            exit(0)
+        except KeyboardInterrupt:
+            exit(0)
